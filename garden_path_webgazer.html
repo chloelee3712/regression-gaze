@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>시선의 궤적 — Garden-Path Demo</title>
+<script src="https://cdn.jsdelivr.net/npm/webgazer@2.0.1/dist/webgazer.min.js" defer></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fafafa; font-family: 'Georgia', serif; color: #1a1a1a; min-height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  #start-screen {
+    position: fixed; inset: 0; background: #fafafa; z-index: 200;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+  }
+  #start-screen.hidden { display: none; }
+  #start-screen h2 { font-size: 18px; font-weight: 400; color: #333; }
+  #start-screen p { font-size: 13px; color: #888; line-height: 1.7; text-align: center; max-width: 400px; }
+  #begin-btn {
+    padding: 14px 40px; font-size: 13px; letter-spacing: 0.1em;
+    font-family: 'Georgia', serif; background: #1a1a1a; color: #fafafa;
+    border: none; cursor: pointer; text-transform: uppercase;
+  }
+  #begin-btn:hover { background: #333; }
+  #begin-btn:disabled { background: #bbb; cursor: default; }
+
+  #calib-screen {
+    position: fixed; inset: 0; background: #fafafa; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  #calib-screen.hidden { display: none; }
+  #calib-msg { font-size: 16px; color: #555; margin-bottom: 40px; text-align: center; line-height: 1.8; }
+  #calib-progress { font-size: 13px; color: #aaa; margin-top: 30px; }
+  .calib-point {
+    position: absolute; width: 28px; height: 28px; border-radius: 50%;
+    background: #1a1a1a; cursor: pointer; transition: all 0.2s;
+    transform: translate(-50%, -50%);
+  }
+  .calib-point:hover { transform: translate(-50%,-50%) scale(1.3); }
+  .calib-point.clicked { background: #4a9a6a; transform: translate(-50%,-50%) scale(0.6); pointer-events: none; }
+
+  #app { display: none; flex-direction: column; min-height: 100vh; }
+  #app.visible { display: flex; }
+  #header { padding: 24px 32px 16px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 12px; }
+  #header h1 { font-size: 13px; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; color: #555; }
+  #status-dot { width: 7px; height: 7px; border-radius: 50%; background: #4a9a6a; margin-left: auto; }
+  #status-text { font-size: 11px; color: #4a9a6a; }
+
+  #main { display: flex; flex: 1; }
+  #left-panel { flex: 1; padding: 48px; display: flex; flex-direction: column; gap: 40px; border-right: 1px solid #e0e0e0; }
+  #sentence-area { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 28px; }
+  #sentence-label { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: #aaa; }
+  #sentence-display { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: baseline; }
+  .word { font-size: 32px; font-weight: 400; padding: 6px 2px; border-bottom: 2px solid transparent; transition: all 0.1s; cursor: default; user-select: none; }
+  .word.fixated { border-bottom-color: #1a1a1a; }
+  #sentence-note { font-size: 13px; color: #999; line-height: 1.75; max-width: 520px; font-style: italic; }
+  #sentence-nav { display: flex; gap: 10px; align-items: center; }
+  .nav-btn { padding: 9px 20px; font-size: 12px; letter-spacing: 0.08em; font-family: 'Georgia', serif; background: transparent; border: 1px solid #ccc; cursor: pointer; color: #444; }
+  .nav-btn:hover:not(:disabled) { background: #f0f0f0; }
+  .nav-btn:disabled { opacity: 0.3; cursor: default; }
+  #sentence-counter { font-size: 11px; color: #bbb; margin-left: 8px; }
+
+  #right-panel { width: 360px; display: flex; flex-direction: column; }
+  #canvas-area { flex: 1; padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+  #canvas-label { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #aaa; }
+  #gaze-canvas { width: 100%; background: #f0f0f0; border: 1px solid #e0e0e0; display: block; }
+  #stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .stat-box { background: #f0f0f0; padding: 12px 16px; }
+  .stat-label { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: #888; }
+  .stat-value { font-size: 22px; font-weight: 400; margin-top: 4px; }
+  #controls { padding: 20px 24px; border-top: 1px solid #e0e0e0; display: flex; flex-direction: column; gap: 8px; }
+  .ctrl-btn { width: 100%; padding: 10px; font-size: 11px; font-family: 'Georgia', serif; background: transparent; color: #888; border: 1px solid #ddd; cursor: pointer; }
+  .ctrl-btn:hover { border-color: #bbb; color: #444; }
+
+  #gaze-dot {
+    position: fixed; width: 16px; height: 16px; border-radius: 50%;
+    background: rgba(200,50,50,0.5); border: 2px solid rgba(200,50,50,0.8);
+    pointer-events: none; z-index: 9999; transform: translate(-50%,-50%);
+    display: none; transition: left 0.05s, top 0.05s;
+  }
+
+  /* 웹캠 미리보기를 작게 왼쪽 하단에 고정 */
+  #webgazerVideoContainer {
+    position: fixed !important;
+    bottom: 10px !important;
+    left: 10px !important;
+    top: auto !important;
+    width: 160px !important;
+    height: 120px !important;
+    z-index: 9998 !important;
+    border: 2px solid #ddd !important;
+    border-radius: 4px !important;
+    opacity: 0.8 !important;
+  }
+  #webgazerVideoFeed {
+    width: 160px !important;
+    height: 120px !important;
+  }
+  #webgazerFaceFeedbackBox {
+    position: fixed !important;
+    bottom: 10px !important;
+    left: 10px !important;
+    top: auto !important;
+    width: 160px !important;
+    height: 120px !important;
+    z-index: 9999 !important;
+    border: none !important;
+  }
+  #webgazerGazeDot { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="gaze-dot"></div>
+
+<div id="start-screen">
+  <h2>시선의 궤적</h2>
+  <p>웹캠으로 시선을 추적하여 garden-path 문장을 읽는 과정을 드로잉합니다.<br><br>밝은 환경에서 얼굴을 정면으로 향해주세요.</p>
+  <button id="begin-btn">웹캠 연결 시작</button>
+</div>
+
+<div id="calib-screen" class="hidden">
+  <div id="calib-msg">각 점을 <strong>바라보면서</strong> 클릭해주세요.<br>점마다 1번씩, 총 9개를 클릭하면 됩니다.<br><br><span style="font-size:12px;color:#aaa;">왼쪽 하단에 웹캠 미리보기가 보이면 얼굴이 인식되고 있는 것입니다.</span></div>
+  <div id="calib-progress">0 / 9</div>
+</div>
+
+<div id="app">
+  <div id="header">
+    <h1>시선의 궤적 — Garden-Path Demo</h1>
+    <span id="status-text">추적 중</span>
+    <span id="status-dot"></span>
+  </div>
+  <div id="main">
+    <div id="left-panel">
+      <div id="sentence-area">
+        <div id="sentence-label">Garden-Path Sentence</div>
+        <div id="sentence-display"></div>
+        <div id="sentence-note"></div>
+      </div>
+      <div id="sentence-nav">
+        <button class="nav-btn" id="prev-btn" disabled>← 이전</button>
+        <button class="nav-btn" id="next-btn">다음 →</button>
+        <span id="sentence-counter"></span>
+      </div>
+    </div>
+    <div id="right-panel">
+      <div id="canvas-area">
+        <div id="canvas-label">실시간 시선 드로잉</div>
+        <canvas id="gaze-canvas" width="310" height="240"></canvas>
+        <div id="stats">
+          <div class="stat-box"><div class="stat-label">데이터 수신</div><div class="stat-value" id="data-count">0</div></div>
+          <div class="stat-box"><div class="stat-label">측정 횟수</div><div class="stat-value" id="fixation-count">0</div></div>
+          <div class="stat-box"><div class="stat-label">회귀 감지</div><div class="stat-value" id="regression-count" style="color:#b04040;">0</div></div>
+        </div>
+      </div>
+      <div id="controls">
+        <button class="ctrl-btn" id="recalib-btn">재캘리브레이션</button>
+        <button class="ctrl-btn" id="clear-btn">드로잉 초기화</button>
+        <button class="ctrl-btn" id="toggle-dot-btn">시선 표시 점 켜기/끄기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var sentences = [
+  { text: "The horse raced past the barn fell.", note: "→ barn까지 raced를 동사로 처리하다가 fell에서 재분석." },
+  { text: "Since Jay always jogs a mile seems like a short distance.", note: "→ a mile을 목적어로 읽다가 seems에서 재분석." },
+  { text: "The old man the boats.", note: "→ old man을 명사구로 읽다가 the boats에서 man이 동사임을 깨달음." },
+  { text: "While Mary was mending the clock started to chime.", note: "→ the clock을 목적어로 처리하다가 started에서 재분석." },
+  { text: "The complex houses married and single soldiers and their families.", note: "→ houses를 명사로 읽다가 구조 전체가 뒤집힘." }
+];
+var currentIdx = 0;
+var gazePoints = [];
+var fixationCount = 0;
+var regressionCount = 0;
+var dataCount = 0;
+var lastGazeX = null;
+var cooldown = 0;
+var trackingActive = false;
+var showDot = true;
+
+var canvas = document.getElementById('gaze-canvas');
+var ctx = canvas.getContext('2d');
+var gazeDot = document.getElementById('gaze-dot');
+
+function renderSentence() {
+  var s = sentences[currentIdx];
+  var d = document.getElementById('sentence-display');
+  d.innerHTML = '';
+  s.text.split(' ').forEach(function(w) {
+    var span = document.createElement('span');
+    span.className = 'word';
+    span.textContent = w;
+    d.appendChild(span);
+  });
+  document.getElementById('sentence-note').textContent = s.note;
+  document.getElementById('sentence-counter').textContent = (currentIdx+1)+' / '+sentences.length;
+  document.getElementById('prev-btn').disabled = currentIdx === 0;
+  document.getElementById('next-btn').disabled = currentIdx === sentences.length - 1;
+}
+document.getElementById('prev-btn').onclick = function(){ if(currentIdx>0){currentIdx--;renderSentence();} };
+document.getElementById('next-btn').onclick = function(){ if(currentIdx<sentences.length-1){currentIdx++;renderSentence();} };
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(gazePoints.length<2) return;
+  for(var i=1;i<gazePoints.length;i++){
+    var p=gazePoints[i-1], c=gazePoints[i];
+    ctx.beginPath(); ctx.moveTo(p.cx,p.cy); ctx.lineTo(c.cx,c.cy);
+    ctx.strokeStyle = c.r ? 'rgba(176,64,64,0.75)' : 'rgba(26,26,26,0.3)';
+    ctx.lineWidth = c.r ? 2.5 : 1.2;
+    ctx.stroke();
+  }
+  var l=gazePoints[gazePoints.length-1];
+  ctx.beginPath(); ctx.arc(l.cx,l.cy,4,0,Math.PI*2); ctx.fillStyle='#1a1a1a'; ctx.fill();
+}
+
+var calibPositions = [[10,10],[50,10],[90,10],[10,50],[50,50],[90,50],[10,90],[50,90],[90,90]];
+var calibClicked = 0;
+
+function createCalibPoints() {
+  document.querySelectorAll('.calib-point').forEach(function(el){ el.remove(); });
+  calibClicked = 0;
+  document.getElementById('calib-progress').textContent = '0 / 9';
+  var screen = document.getElementById('calib-screen');
+  calibPositions.forEach(function(pos) {
+    var div = document.createElement('div');
+    div.className = 'calib-point';
+    div.style.left = pos[0] + '%';
+    div.style.top = pos[1] + '%';
+    div.onclick = function() {
+      if(div.classList.contains('clicked')) return;
+      div.classList.add('clicked');
+      calibClicked++;
+      document.getElementById('calib-progress').textContent = calibClicked + ' / 9';
+      if(calibClicked >= 9) {
+        setTimeout(function() {
+          document.getElementById('calib-screen').classList.add('hidden');
+          document.getElementById('app').classList.add('visible');
+          trackingActive = true;
+          gazeDot.style.display = 'block';
+        }, 600);
+      }
+    };
+    screen.appendChild(div);
+  });
+}
+
+function onGaze(data, elapsed) {
+  if(!data) return;
+  var x = data.x;
+  var y = data.y;
+  if(x == null || y == null || isNaN(x) || isNaN(y)) return;
+
+  dataCount++;
+  var dc = document.getElementById('data-count');
+  if(dc) dc.textContent = dataCount;
+
+  if(showDot && gazeDot) {
+    gazeDot.style.left = x + 'px';
+    gazeDot.style.top = y + 'px';
+  }
+
+  if(!trackingActive) return;
+
+  var cx = (x / window.innerWidth) * canvas.width;
+  var cy = (y / window.innerHeight) * canvas.height;
+
+  var r = false;
+  if(lastGazeX !== null && cooldown <= 0 && x < lastGazeX - 50) {
+    r = true;
+    regressionCount++;
+    document.getElementById('regression-count').textContent = regressionCount;
+    cooldown = 10;
+  }
+  if(cooldown > 0) cooldown--;
+  lastGazeX = x;
+  fixationCount++;
+  document.getElementById('fixation-count').textContent = fixationCount;
+
+  gazePoints.push({cx:cx, cy:cy, r:r});
+  if(gazePoints.length > 300) gazePoints.shift();
+  draw();
+
+  document.querySelectorAll('.word').forEach(function(el) {
+    el.classList.remove('fixated');
+    var rect = el.getBoundingClientRect();
+    if(x >= rect.left-15 && x <= rect.right+15 && y >= rect.top-15 && y <= rect.bottom+15)
+      el.classList.add('fixated');
+  });
+}
+
+// 시작 — 비디오 미리보기를 숨기지 않음
+document.getElementById('begin-btn').onclick = function() {
+  var btn = this;
+  btn.disabled = true;
+  btn.textContent = '연결 중...';
+
+  webgazer
+    .setGazeListener(onGaze)
+    .showPredictionPoints(false)
+    .showVideo(true)
+    .showFaceOverlay(true)
+    .showFaceFeedbackBox(true)
+    .begin()
+    .then(function() {
+      document.getElementById('start-screen').classList.add('hidden');
+      document.getElementById('calib-screen').classList.remove('hidden');
+      createCalibPoints();
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.textContent = '오류: ' + e.message;
+    });
+};
+
+document.getElementById('recalib-btn').onclick = function() {
+  trackingActive = false;
+  gazeDot.style.display = 'none';
+  webgazer.clearData();
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('calib-screen').classList.remove('hidden');
+  createCalibPoints();
+};
+
+document.getElementById('clear-btn').onclick = function() {
+  gazePoints=[]; fixationCount=0; regressionCount=0; lastGazeX=null; cooldown=0;
+  document.getElementById('fixation-count').textContent='0';
+  document.getElementById('regression-count').textContent='0';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  document.querySelectorAll('.word').forEach(function(el){el.classList.remove('fixated');});
+};
+
+document.getElementById('toggle-dot-btn').onclick = function() {
+  showDot = !showDot;
+  gazeDot.style.display = showDot ? 'block' : 'none';
+};
+
+renderSentence();
+</script>
+</body>
+</html>
